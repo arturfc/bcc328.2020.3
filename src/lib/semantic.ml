@@ -62,7 +62,8 @@ let rec check_exp env (pos, (exp, tref)) =
   | A.IntExp  _ -> set tref T.INT
   | A.RealExp _ -> set tref T.REAL
   | A.StringExp _ -> set tref T.STRING
-  | A.LetExp (decs, body) -> check_exp_let env pos tref decs body
+  | A.LetExp (decs, body) ->  check_exp_let env pos tref decs body
+                              | _ -> Error.fatal "unimplemented"
   | A.BreakExp -> (if (env.inloop) then
                     T.VOID
                   else
