@@ -63,7 +63,55 @@ let rec check_exp env (pos, (exp, tref)) =
   | A.RealExp _ -> set tref T.REAL
   | A.StringExp _ -> set tref T.STRING
   | A.LetExp (decs, body) -> check_exp_let env pos tref decs body
-  | _ -> Error.fatal "unimplemented"
+  | A.BreakExp -> (if (env.inloop) then
+                    T.VOID
+                  else
+                    Error.error pos "break outside of the loop")
+  | A.NegativeExp (expression) -> (let value = check_exp env expression in
+                                  begin match value with
+                                    | T.INT  -> set tref value
+                                    | T.REAL -> set tref value
+                                    | _ -> type_mismatch pos T.REAL value
+                                  end)                             
+  | A.BinaryExp (left, operation, right) -> (let left_type = check_exp env left in
+                                            let right_type = check_exp env right in
+                                            begin match operation with
+                                              | A.Plus | A.Minus | A.Div | A.Times | A.Mod | A.Power -> check_var_type pos left_type right_type tref
+                                              | A.And | A.Or -> check_logic_type pos left_type right_type tref
+                                              | A.Equal | A.NotEqual | A.LowerThan | A.GreaterThan | A.GreaterEqual | A.LowerEqual -> check_type_comparison pos left_type right_type tref
+                                              | _ -> Error.fatal "not implemented"
+                                            end)
+  | A.ExpSeq (list_expression) -> (let rec check_seq = function
+                                  | []         -> T.VOID
+                                  | [head]     -> check_exp env head
+                                  | head::tail -> ignore (check_exp env head); 
+                                  check_seq tail
+                                  in
+                                    check_seq list_expression)
+  | A.WhileExp (comparison, exp) -> let e_loop = {env with inloop = true} in
+                                    ignore(check_exp e_loop comparison);
+                                    ignore(check_exp e_loop exp);
+                                    set tref T.VOID
+                                    | _ -> Error.fatal "not implemented"
+
+and check_var_type pos left_var_type right_var_type tref =
+  match left_var_type, right_var_type with
+  | T.INT,  T.INT  -> set tref T.INT
+  | T.INT,  T.REAL
+  | T.REAL, T.INT
+  | T.REAL, T.REAL -> set tref T.REAL
+  | _              -> type_mismatch pos right_var_type right_var_type
+
+and check_logic_type pos left_expression right_expression tref =
+  match left_expression, right_expression with
+  | T.BOOL, T.BOOL -> set tref T.BOOL
+  | _ -> (match left_expression with | T.BOOL -> type_mismatch pos T.BOOL right_expression | _ -> type_mismatch pos T.BOOL left_expression)
+
+and check_type_comparison pos left_var_type right_var_type tref =
+  match left_var_type with
+  | T.STRING -> (match right_var_type with T.STRING -> set tref T.BOOL |_-> type_mismatch pos T.STRING right_var_type)
+  | T.INT    -> (match right_var_type with T.INT    -> set tref T.BOOL |_-> type_mismatch pos T.INT right_var_type)
+  | T.REAL   -> (match right_var_type with T.REAL   -> set tref T.BOOL |_-> type_mismatch pos T.REAL right_var_type)
 
 and check_exp_let env pos tref decs body =
   let env' = List.fold_left check_dec env decs in
