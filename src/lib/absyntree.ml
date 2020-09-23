@@ -27,6 +27,10 @@ let tree_of_option conversion_function opt =
   | None   -> Tree.empty
   | Some v -> conversion_function v
 
+let tree_of_param (s, s') = mktr "ParamDef" [tree_of_symbol s; tree_of_symbol s']
+
+let tree_of_paramlist p = mktr "ParamList" (List.map tree_of_param p)
+
 (* Convert a binary operator to a string *)
 let stringfy_op op =
   match op with
@@ -76,6 +80,7 @@ and tree_of_exp_basic exp =
   | CallExp (f, xs)           -> mktr "CallExp" [mktr (name f) []; mktr "Args" (List.map tree_of_lexp xs)]
   | VarExp x                  -> mktr "VarExp" [tree_of_lvar x]
   | LetExp (d, e)             -> mktr "LetExp" [mktr "Decs" (List.map tree_of_ldec d); tree_of_lexp e]
+  | AssignExp (v,e)           -> mktr "AssignExp" [tree_of_lvar v; tree_of_lexp e]
 
 and tree_of_var var =
   match var with
@@ -85,11 +90,18 @@ and tree_of_var var =
 and tree_of_dec dec =
   match dec with
   | VarDec vardec -> tree_of_typed tree_of_vardec vardec
+  | FunDec fundec -> tree_of_typed tree_of_fundec fundec
 
 and tree_of_vardec (v, t, i) =
   mktr "VarDec" [ tree_of_symbol v;
                   tree_of_option tree_of_symbol t;
                   tree_of_lexp i ]
+
+and tree_of_fundec (n, p, t, e) =
+  mktr "FunDec" [ tree_of_symbol n;
+  tree_of_paramlist p;
+  tree_of_symbol t;
+  tree_of_lexp e ]
 
 (* Convert an anotated expression to a generic tree *)
 and tree_of_lexp (_, x) = tree_of_exp x

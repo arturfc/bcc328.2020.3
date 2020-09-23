@@ -54,6 +54,41 @@ let set reference value =
   reference := Some value;
   value
 
+(* Returns the variables' types in the function parameters list *)
+let rec get_type_param lparams acc env pos =
+  match lparams with
+  | (_, t)::tail -> get_type_param tail (List.append acc [tylook env.tenv t pos]) env pos
+  | []           -> acc
+
+(* Returns the variables' names in the function parameters list *)
+let rec get_name_param lparams acc =
+  match lparams with
+  | (n, _)::tail -> get_name_param tail (List.append acc [S.name n])
+  | []           -> acc
+
+(* Checks if a variable name was declared more than once in the function parameters' list *)
+let rec verify_var_name ln pos =
+  match ln with
+  | head::tail -> if 
+                    List.mem head tail then Error.error pos "Variable '%s' already declared before" head
+                  else
+                    verify_var_name tail pos
+  | _    -> ()
+
+(* Returns a new environment with the current function *)
+let verify_type_param funcname lparams type_ret (env, pos) =
+ let formals = get_type_param lparams [] env pos in
+   let venv' = S.enter funcname (FunEntry(formals, type_ret)) env.venv in
+   {env with venv = venv'}
+
+(* Adds all the parameters variables to the function's body environment *)
+let rec put_env_fun lparam env pos =
+  match lparam with
+  | (n, t)::tail -> let venv' = S.enter n (VarEntry (tylook env.tenv t pos)) env.venv in
+                    let env' = {env with venv = venv'} in
+                    put_env_fun tail env' pos
+  | []           -> env
+
 (* Checking expressions *)
 
 let rec check_exp env (pos, (exp, tref)) =
@@ -63,7 +98,6 @@ let rec check_exp env (pos, (exp, tref)) =
   | A.RealExp _ -> set tref T.REAL
   | A.StringExp _ -> set tref T.STRING
   | A.LetExp (decs, body) ->  check_exp_let env pos tref decs body
-                              | _ -> Error.fatal "unimplemented"
   | A.BreakExp -> (if (env.inloop) then
                     T.VOID
                   else
@@ -77,7 +111,7 @@ let rec check_exp env (pos, (exp, tref)) =
   | A.BinaryExp (left, operation, right) -> (let left_type = check_exp env left in
                                             let right_type = check_exp env right in
                                             begin match operation with
-                                              | A.Plus | A.Minus | A.Div | A.Times | A.Mod | A.Power -> check_var_type pos left_type right_type tref
+                                              | A.Plus | A.Minus | A.Div | A.Times | A.Mod | A.Power -> check_op pos left_type right_type tref
                                               | A.And | A.Or -> check_logic_type pos left_type right_type tref
                                               | A.Equal | A.NotEqual | A.LowerThan | A.GreaterThan | A.GreaterEqual | A.LowerEqual -> check_type_comparison pos left_type right_type tref
                                               | _ -> Error.fatal "not implemented"
@@ -89,13 +123,35 @@ let rec check_exp env (pos, (exp, tref)) =
                                   check_seq tail
                                   in
                                     check_seq list_expression)
-  | A.WhileExp (comparison, exp) -> let e_loop = {env with inloop = true} in
+  | A.WhileExp (comparison, exp) -> (let e_loop = {env with inloop = true} in
                                     ignore(check_exp e_loop comparison);
                                     ignore(check_exp e_loop exp);
-                                    set tref T.VOID
-                                    | _ -> Error.fatal "not implemented"
+                                    set tref T.VOID)
+  | A.VarExp v -> check_var env v tref
+  | A.IfExp (comparison, exp_then, exp_else) ->
+                                    (compatible (check_exp env comparison) T.BOOL (loc comparison);
+                                    let tipo_then = check_exp env exp_then in
+                                    match exp_else with
+                                    | Some exp ->
+                                      let tipo_else = check_exp env exp in
+                                      if T.coerceable tipo_then tipo_else then
+                                        tipo_else
+                                      else if T.coerceable tipo_else tipo_then then
+                                        tipo_then 
+                                      else Error.fatal "Types not compatibles"
+                                    | None -> T.VOID)
+  | A.CallExp (name, lexpr) ->  (let (params, result) = funlook env.venv name pos in  
+                                ignore(match_fun_param_types lexpr params env pos);
+                                set tref result)
+  | _ -> Error.fatal "not implemented"
 
-and check_var_type pos left_var_type right_var_type tref =
+and check_var env (pos, v) tref =
+  match v with
+  | A.SimpleVar id -> (let t = varlook env.venv id pos in
+                      set tref t)
+  | _ -> Error.fatal "not implemented"
+
+and check_op pos left_var_type right_var_type tref =
   match left_var_type, right_var_type with
   | T.INT,  T.INT  -> set tref T.INT
   | T.INT,  T.REAL
@@ -119,7 +175,25 @@ and check_exp_let env pos tref decs body =
   let tbody = check_exp env' body in
   set tref tbody
 
-(* Checking declarations *)
+and match_fun_param_types lexpr lparam env pos =
+  match lexpr, lparam with
+  | (eh::et, ph::pt) -> let etype = check_exp env eh in
+                        compatible etype ph pos;
+                        match_fun_param_types et pt env pos
+  | [], []           -> ()
+  | _                -> Error.error pos "Function declared with different parameter"
+
+and check_dec_fun env pos ((name, params_list, type_ret, body), tref) =
+  let rt     = tylook env.tenv type_ret pos in 
+  let env'   = verify_type_param name params_list rt (env, pos) in
+  let lnames = get_name_param params_list [] in
+  ignore(verify_var_name lnames pos);
+
+  let envbody = put_env_fun params_list env' pos in
+  let tbody = check_exp envbody body in
+  compatible tbody rt pos;
+  ignore(set tref rt);
+  env'
 
 and check_dec_var env pos ((name, type_opt, init), tref) =
   let tinit = check_exp env init in
@@ -138,6 +212,7 @@ and check_dec_var env pos ((name, type_opt, init), tref) =
 and check_dec env (pos, dec) =
   match dec with
   | A.VarDec x -> check_dec_var env pos x
+  | A.FunDec x -> check_dec_fun env pos x
   | _ -> Error.fatal "unimplemented"
 
 let semantic program =

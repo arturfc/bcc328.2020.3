@@ -44,7 +44,7 @@
 %token                 VAR
 %token                 WHILE
 %token                 UMINUS
-
+%token                 FUNCTION
 %right                 OR
 %right                 AND
 %left                  EQ NE GT GE LT LE
@@ -87,6 +87,8 @@ exp:
 | LPAREN es=exp_seq RPAREN                     {$loc % ExpSeq es}
 | x=var                                        {$loc % VarExp x}
 | LET d=list(dec) IN e=exp                     {$loc % LetExp (d, e)}
+| x=var ASSIGN e=exp        			       {$loc % AssignExp (x,e)}
+
 
 (* semicolon separated sequence of expressions *)
 exp_seq:
@@ -103,6 +105,13 @@ var:
 (* declarations *)
 dec:
 | VAR x=ID t=optional_type EQ e=exp            {$loc, VarDec (dummyt (x, t, e))}
+| FUNCTION n=ID LPAREN p=param_list RPAREN COLON t=ID EQ e=exp          {$loc, FunDec (dummyt (n, p, t, e))}
 
 optional_type:
 | ot=option(COLON t=ID {t})                    {ot}
+
+param_list:
+| t=separated_list(COMMA, param)                                        {t}
+
+param:
+| n=ID COLON t=ID                                                       {n, t}
